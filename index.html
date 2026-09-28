@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weather Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --border:#334155; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); padding:24px; max-width:1100px; margin:0 auto; }
+    header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:20px; }
+    h1 { font-size:1.5rem; } h1 span { color:var(--accent); }
+    button { background:var(--accent); color:#0f172a; border:none; border-radius:8px; padding:8px 16px; font-weight:600; cursor:pointer; }
+    button:hover { opacity:.9; }
+    .hint { color:var(--muted); font-size:.85rem; margin-bottom:20px; line-height:1.5; }
+    .hint code { background:var(--card); padding:2px 6px; border-radius:4px; color:var(--accent); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px; margin-bottom:28px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; }
+    .card h2 { font-size:1.1rem; margin-bottom:4px; }
+    .card .desc { color:var(--muted); font-size:.9rem; margin-bottom:12px; }
+    .card .temp { font-size:2.2rem; font-weight:700; }
+    .card .meta { color:var(--muted); font-size:.85rem; margin-top:8px; }
+    .chart-wrap { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; }
+    .chart-wrap h2 { font-size:1.1rem; margin-bottom:12px; }
+    .empty { color:var(--muted); padding:40px; text-align:center; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Weather <span>Dashboard</span></h1>
+    <button onclick="load()">↻ Refresh</button>
+  </header>
+  <p class="hint">
+    Cities come from <code>cities.json</code>. Tell Claude Code <em>"add Tokyo to my weather dashboard"</em>,
+    then hit Refresh. Live data from Open-Meteo (no API key).
+  </p>
+  <div class="grid" id="cards"></div>
+  <div class="chart-wrap">
+    <h2>Current temperature comparison (°C)</h2>
+    <canvas id="chart" height="120"></canvas>
+  </div>
+  <script>
+    const WEATHER_CODES = {0:"Clear sky",1:"Mainly clear",2:"Partly cloudy",3:"Overcast",45:"Fog",48:"Rime fog",51:"Light drizzle",61:"Light rain",63:"Rain",65:"Heavy rain",71:"Light snow",73:"Snow",75:"Heavy snow",80:"Rain showers",95:"Thunderstorm"};
+    let chart;
+    async function geocode(city) {
+      const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`);
+      const data = await res.json();
+      return data.results ? data.results[0] : null;
+    }
+    async function getWeather(place) {
+      const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&timezone=auto`);
+      return (await res.json()).current;
+    }
+    function card(name, cur) {
+      const desc = WEATHER_CODES[cur.weather_code] || "Unknown";
+      return `<div class="card"><h2>${name}</h2><div class="desc">${desc}</div>
+        <div class="temp">${Math.round(cur.temperature_2m)}°</div>
+        <div class="meta">Humidity ${cur.relative_humidity_2m}% · Wind ${cur.wind_speed_10m} km/h</div></div>`;
+    }
+    async function load() {
+      const el = document.getElementById("cards");
+      el.innerHTML = `<p class="empty">Loading…</p>`;
+      let cities = [];
+      try {
+        const res = await fetch("cities.json?_=" + Date.now());
+        cities = (await res.json()).cities || [];
+      } catch (e) {
+        el.innerHTML = `<p class="empty">Couldn't read cities.json. Serve the folder with <code>python -m http.server 8000</code>.</p>`;
+        return;
+      }
+      if (!cities.length) { el.innerHTML = `<p class="empty">No cities yet. Ask Claude to add one.</p>`; if (chart) chart.destroy(); return; }
+      const rows = [];
+      for (const c of cities) { const p = await geocode(c); if (p) rows.push({ name:p.name, cur:await getWeather(p) }); }
+      el.innerHTML = rows.map(r => card(r.name, r.cur)).join("");
+      drawChart(rows);
+    }
+    function drawChart(rows) {
+      const ctx = document.getElementById("chart");
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: "bar",
+        data: { labels: rows.map(r=>r.name), datasets: [{ data: rows.map(r=>r.cur.temperature_2m), backgroundColor:"#38bdf8", borderRadius:6 }] },
+        options: { plugins:{legend:{display:false}}, scales:{ y:{grid:{color:"#334155"},ticks:{color:"#94a3b8"}}, x:{grid:{display:false},ticks:{color:"#e2e8f0"}} } }
+      });
+    }
+    load();
+  </script>
+</body>
+</html>
